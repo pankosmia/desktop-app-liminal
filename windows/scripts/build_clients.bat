@@ -29,7 +29,7 @@ if exist "build_clients_*.log" (
   if /I "%c%" EQU "" goto :delete_logs
   if /I "%c%" EQU "Y" goto :delete_logs
   if /I "%c%" EQU "N" goto :moving_on
-  echo "%c%" is not a valid response. Please type y or 'Enter' to continue or 'n' to quit.
+  echo "%c%" is not a valid response. Type y or 'Enter' to delete past logs or 'n' to keep them.
   goto :choice
 
   :delete_logs
@@ -44,7 +44,8 @@ for /F "tokens=1,2 delims==" %%A in (..\..\app_config.env) do set %%A=%%B
 setlocal ENABLEDELAYEDEXPANSION
 
 REM ---- logging + failure tracking ----
-set "LOG=%~dp0build_clients_%DATE:~-4%%DATE:~4,2%%DATE:~7,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%.log"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%I"
+set "LOG=%~dp0build_clients_%TS%.log"
 set "LOG=%LOG: =0%"
 > "%LOG%" echo ===== Build started %DATE% %TIME% =====
 set "FAILS="
