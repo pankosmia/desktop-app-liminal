@@ -1,40 +1,36 @@
 @echo off
-REM Run from pankosmia\[this-repo's-name]\windows\scripts directory in powershell or command by:  .\build_clients.bat
+REM Run from pankosmia\[this-repo's-name]\windows\scripts directory in PowerShell or cmd by:  .\build_clients.bat
 
 REM The -d positional argument means to delete past logs without asking
+set "deleteLogs="
+
 :loop
-IF "%~1"=="" (
-  goto :continue
-) ELSE IF "%~1"=="-d" (
-  set "deleteLogs=%~1"
-)
+if "%~1"=="" goto :continue
+if /I "%~1"=="-d" set "deleteLogs=-d"
 shift
 goto :loop
 
 :continue
 
 REM Assign default value if -d is not present
-if not defined %deleteLogs (
-  set "deleteLogs=-no"
-)
+if not defined deleteLogs set "deleteLogs=-no"
 
 if exist "build_clients_*.log" (
   echo.
   :choice
-  IF "%deleteLogs%"=="-d" (
+  if /I "%deleteLogs%"=="-d" (
     goto :delete_logs
-  ) ELSE (
-    set /P c=Delete past logs? [Y/n]: 
+  ) else (
+    set /P "c=Delete past logs? [Y/n]: "
   )
-  if /I "%c%" EQU "" goto :delete_logs
-  if /I "%c%" EQU "Y" goto :delete_logs
-  if /I "%c%" EQU "N" goto :moving_on
-  echo "%c%" is not a valid response. Please type y or 'Enter' to continue or 'n' to quit.
+  if /I "%c%"==""  goto :delete_logs
+  if /I "%c%"=="Y" goto :delete_logs
+  if /I "%c%"=="N" goto :moving_on
+  echo "%c%" is not a valid response. Type y or 'Enter' to delete past logs or 'n' to keep them.
   goto :choice
 
   :delete_logs
   del /q "build_clients_*.log"
-
 )
 
 :moving_on
@@ -44,16 +40,14 @@ for /F "tokens=1,2 delims==" %%A in (..\..\app_config.env) do set %%A=%%B
 setlocal ENABLEDELAYEDEXPANSION
 
 REM ---- logging + failure tracking ----
-set "LOG=%~dp0build_clients_%DATE:~-4%%DATE:~4,2%%DATE:~7,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%.log"
-set "LOG=%LOG: =0%"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "TS=%%I"
+set "LOG=%~dp0build_clients_%TS%.log"
 > "%LOG%" echo ===== Build started %DATE% %TIME% =====
-set "FAILS="
 set /a FAILCOUNT=0
 
 REM Create a tiny PowerShell helper script once (used for tee-ing output)
 set "PSRUNNER=%TEMP%\bat_tee_run.ps1"
 del "%PSRUNNER%" 2>nul
-if exist "%PSRUNNER%" goto :PSRUNNER_READY
 >  "%PSRUNNER%" echo $LogPath = $args[0]
 >> "%PSRUNNER%" echo $cmdLine = ($args ^| Select-Object -Skip 1^) -join ' '
 >> "%PSRUNNER%" echo $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -66,29 +60,28 @@ if exist "%PSRUNNER%" goto :PSRUNNER_READY
 >> "%PSRUNNER%" echo   }
 >> "%PSRUNNER%" echo } finally { $sw.Dispose() }
 >> "%PSRUNNER%" echo exit $LASTEXITCODE
-:PSRUNNER_READY
 REM -----------------------------------
 
 set count=0
 for /f "tokens=*" %%a in (..\..\app_config.env) do (
-  set /a count+= 1
+  set /a count+=1
 )
 
 cd ..\..\
-for %%I in (.) do set RepoDirName=%%~nxI
+for %%I in (.) do set "RepoDirName=%%~nxI"
 cd ..\
 
 for /l %%a in (1,1,%count%) do (
   if "!ASSET%%a!" NEQ "" (
     REM Remove any spaces, e.g. trailing ones
-    set ASSET%%a=!ASSET%%a: =!
+    set "ASSET%%a=!ASSET%%a: =!"
     call :log ############################### BEGIN Asset %%a: !ASSET%%a! ###############################
     if not exist !ASSET%%a! (
-      call :log.
+      call :log
       call :log ****************************************************
       call :log !ASSET%%a! does not exist; Run .\clone.bat
       call :log ****************************************************
-      call :log.
+      call :log
     ) else (
       cd !ASSET%%a!
       call :log ^> git checkout main...
@@ -100,7 +93,7 @@ for /l %%a in (1,1,%count%) do (
       if errorlevel 1 call :markfail "ASSET" "!ASSET%%a!" "git pull"
 
       call :log ################################ END Asset %%a: !ASSET%%a! ################################
-      call :log.
+      call :log
       cd ..
     )
   )
@@ -109,14 +102,14 @@ for /l %%a in (1,1,%count%) do (
 for /l %%a in (1,1,%count%) do (
   if "!CLIENT%%a!" NEQ "" (
     REM Remove any spaces, e.g. trailing ones
-    set CLIENT%%a=!CLIENT%%a: =!
+    set "CLIENT%%a=!CLIENT%%a: =!"
     call :log ############################### BEGIN Client %%a: !CLIENT%%a! ###############################
     if not exist !CLIENT%%a! (
-      call :log.
+      call :log
       call :log ***************************************************************************************
       call :log !CLIENT%%a! does not exist; Run .\clone.bat then rerun .\build_clients_main.bat
       call :log ***************************************************************************************
-      call :log.
+      call :log
     ) else (
       cd !CLIENT%%a!
       call :log ^> git checkout main...
@@ -136,7 +129,7 @@ for /l %%a in (1,1,%count%) do (
       if errorlevel 1 call :markfail "CLIENT" "!CLIENT%%a!" "npm run build"
 
       call :log ################################ END Client %%a: !CLIENT%%a! ################################
-      call :log.
+      call :log
       cd ..
     )
   )
@@ -160,19 +153,24 @@ if /i "%GITHUB_ACTIONS%"=="true" (
   for %%F in ("%LOG%") do echo Full log: "%%~nxF" in the current directory.
 )
 echo ===========================================================================
-REM -----------------------------------
 
 set "EXITCODE=0"
 if %FAILCOUNT% GTR 0 set "EXITCODE=1"
 
-endlocal & exit /b %EXITCODE%
+endlocal
+exit /b %EXITCODE%
 
 
 :log
-REM Echo to screen AND append the same line to %LOG% (UTF-8 via PowerShell)
+REM Echo to screen AND append the same line to %LOG% (UTF-8, no BOM)
 set "LINE=%*"
-echo %LINE%
-powershell -NoProfile -Command "$s=$env:LINE; [System.IO.File]::AppendAllText($env:LOG, $s + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))" >nul
+if "%~1"=="" (
+  echo.
+  powershell -NoProfile -Command "[System.IO.File]::AppendAllText($env:LOG, [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))" >nul
+) else (
+  echo %LINE%
+  powershell -NoProfile -Command "$s=$env:LINE; [System.IO.File]::AppendAllText($env:LOG, $s + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding($false)))" >nul
+)
 exit /b 0
 
 
